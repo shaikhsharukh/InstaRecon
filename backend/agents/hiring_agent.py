@@ -1,11 +1,13 @@
 import re
+import time
 import asyncio
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
 
 from agent_template import BaseAgent
-from models import AgentReport, AgentStatus, JobListing, HiringSignalReport, StrategicInference
+from models import AgentReport, AgentStatus, JobListing, HiringSignalReport, StrategicInference, Finding
 from logger import logger
 
 
@@ -39,43 +41,109 @@ class HiringAgent(BaseAgent):
         super().__init__(self.agent_id, self.agent_name)
 
     async def run(self, url: str, on_finding: callable) -> AgentReport:
-        domain = self._extract_domain(url)
-        if not domain:
-            return self.on_error("Could not extract domain from URL")
+        start_time = time.monotonic()
+        finding_count = 0
+        sandbox = None
+        sandbox_start = time.monotonic()
 
-        careers_task = self._scrape_careers_page(url, domain)
-        linkedin_task = self._scrape_job_board(domain, "linkedin")
-        indeed_task = self._scrape_job_board(domain, "indeed")
-
-        careers_listings, linkedin_listings, indeed_listings = await asyncio.gather(
-            careers_task, linkedin_task, indeed_task, return_exceptions=True
-        )
-
-        if isinstance(careers_listings, Exception):
-            careers_listings = []
-        if isinstance(linkedin_listings, Exception):
-            linkedin_listings = []
-        if isinstance(indeed_listings, Exception):
-            indeed_listings = []
-
-        all_listings = careers_listings + linkedin_listings + indeed_listings
-
-        if not all_listings:
-            report = self.create_report(
-                data={
-                    "total_open_roles": 0,
-                    "department_breakdown": {},
-                    "top_hiring_departments": [],
-                    "strategic_inferences": [],
-                    "growth_stage": "unknown",
-                    "sources_used": [],
-                    "message": "No job listings found",
-                }
+        try:
+            await on_finding(
+                Finding(
+                    agent_id=self.agent_id,
+                    agent_name=self.agent_name,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    description="Starting career and hiring audit for " + url,
+                )
             )
-            return report
+            finding_count += 1
 
-        report_data = self._build_hiring_report(all_listings)
-        return self.create_report(data=report_data.model_dump())
+            # Daytona sandbox setup
+            sandbox = await self.create_daytona_sandbox()
+            if sandbox:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Spun up Daytona sandbox (ID: {sandbox.id})",
+                    )
+                )
+                res = await asyncio.to_thread(sandbox.process.exec, "uname -a")
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Daytona sandbox verified: {res.result.strip()}",
+                    )
+                )
+
+            domain = self._extract_domain(url)
+            if not domain:
+                return self.on_error("Could not extract domain from URL")
+
+            careers_task = self._scrape_careers_page(url, domain)
+            linkedin_task = self._scrape_job_board(domain, "linkedin")
+            indeed_task = self._scrape_job_board(domain, "indeed")
+
+            careers_listings, linkedin_listings, indeed_listings = await asyncio.gather(
+                careers_task, linkedin_task, indeed_task, return_exceptions=True
+            )
+
+            if isinstance(careers_listings, Exception):
+                careers_listings = []
+            if isinstance(linkedin_listings, Exception):
+                linkedin_listings = []
+            if isinstance(indeed_listings, Exception):
+                indeed_listings = []
+
+            all_listings = careers_listings + linkedin_listings + indeed_listings
+
+            if not all_listings:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description="No job listings found for this company",
+                    )
+                )
+                finding_count += 1
+                return self.create_report(
+                    data={
+                        "total_open_roles": 0,
+                        "department_breakdown": {},
+                        "top_hiring_departments": [],
+                        "strategic_inferences": [],
+                        "growth_stage": "unknown",
+                        "sources_used": [],
+                        "message": "No job listings found",
+                    }
+                )
+
+            report_data = self._build_hiring_report(all_listings)
+            finding_count += 1
+            return self.create_report(data=report_data.model_dump())
+
+        except asyncio.TimeoutError:
+            return AgentReport(
+                agent_id=self.agent_id,
+                agent_name=self.agent_name,
+                status=AgentStatus.ERROR,
+                error="Hiring analysis timed out",
+                duration=time.monotonic() - start_time,
+            )
+        except Exception as exc:
+            return AgentReport(
+                agent_id=self.agent_id,
+                agent_name=self.agent_name,
+                status=AgentStatus.ERROR,
+                error=str(exc),
+                duration=time.monotonic() - start_time,
+            )
+        finally:
+            if sandbox:
+                await self.destroy_daytona_sandbox(sandbox, sandbox_start)
 
     def _extract_domain(self, url: str) -> Optional[str]:
         url = url.strip().lower()

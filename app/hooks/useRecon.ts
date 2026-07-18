@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { WebSocketManager, type WebSocketEvent } from "../lib/websocket";
+import { getAgentMeta } from "../components/SwarmStatusPanel";
 
 export interface AgentStatus {
   agentId: string;
@@ -26,6 +27,29 @@ export interface TelemetryData {
   metrics: Record<string, number>;
 }
 
+export interface AgentSummary {
+  agentId: string;
+  agentName: string;
+  icon: string;
+  color: string;
+  keyFinding: string;
+  dataQuality: "good" | "warning" | "error";
+}
+
+export interface IntelBriefData {
+  companyName: string;
+  generatedAt: string;
+  durationSeconds: number;
+  agentsCompleted: number;
+  totalAgents: number;
+  cached: boolean;
+  sponsorCalls: number;
+  keyInsight: { text: string; supportingAgents: string[] };
+  risks: Array<{ text: string; supportingAgents: string[] }>;
+  opportunities: Array<{ text: string; supportingAgents: string[] }>;
+  agentSummaries: AgentSummary[];
+}
+
 export interface UseReconState {
   status: "idle" | "running" | "complete" | "error";
   jobId: string | null;
@@ -38,6 +62,8 @@ export interface UseReconState {
   telemetry: Record<string, TelemetryData>;
   cached: boolean;
   cachedAt: string | null;
+  showIntelBrief: boolean;
+  intelBriefData: IntelBriefData | null;
 }
 
 const ALL_AGENTS: AgentStatus[] = [
@@ -62,6 +88,8 @@ const INITIAL_STATE: UseReconState = {
   telemetry: {},
   cached: false,
   cachedAt: null,
+  showIntelBrief: false,
+  intelBriefData: null,
 };
 
 export function useRecon() {
@@ -82,6 +110,8 @@ export function useRecon() {
         telemetry: {},
         cached: false,
         cachedAt: null,
+        showIntelBrief: false,
+        intelBriefData: null,
       }));
 
       try {
@@ -194,13 +224,84 @@ export function useRecon() {
       case "job_complete": {
         const payload = event.payload as {
           status: string;
+          duration_seconds?: number;
+          agents_completed?: number;
+          total_agents?: number;
+          cached?: boolean;
+          sponsor_calls?: number;
         };
-        setState((prev) => ({
-          ...prev,
-          status:
-            payload.status === "complete" ? "complete" : "error",
-          overallProgress: 100,
-        }));
+        setState((prev) => {
+          const isComplete = payload.status === "complete";
+          return {
+            ...prev,
+            status: isComplete ? "complete" : "error",
+            overallProgress: 100,
+            showIntelBrief: isComplete,
+            intelBriefData: prev.intelBriefData
+              ? {
+                  ...prev.intelBriefData,
+                  durationSeconds: payload.duration_seconds ?? prev.intelBriefData.durationSeconds,
+                  agentsCompleted: payload.agents_completed ?? prev.intelBriefData.agentsCompleted,
+                  totalAgents: payload.total_agents ?? prev.intelBriefData.totalAgents,
+                  cached: payload.cached ?? prev.intelBriefData.cached,
+                  sponsorCalls: payload.sponsor_calls ?? prev.intelBriefData.sponsorCalls,
+                  generatedAt: new Date().toISOString(),
+                }
+              : prev.intelBriefData,
+          };
+        });
+        break;
+      }
+      case "synthesis.completed": {
+        const payload = event.payload as {
+          synthesis?: {
+            insights: Array<{ text: string; supporting_agents: string[] }>;
+            risks: Array<{ text: string; supporting_agents: string[] }>;
+            opportunities: Array<{ text: string; supporting_agents: string[] }>;
+          };
+        };
+        if (!payload.synthesis) break;
+        setState((prev) => {
+          const keyInsight = payload.synthesis!.insights?.[0];
+          return {
+            ...prev,
+            intelBriefData: {
+              companyName: "",
+              generatedAt: new Date().toISOString(),
+              durationSeconds: 0,
+              agentsCompleted: prev.agents.filter((a) => a.status === "done").length,
+              totalAgents: prev.agents.length,
+              cached: prev.cached,
+              sponsorCalls: Object.values(prev.telemetry).reduce((sum, t) => sum + t.calls, 0),
+              keyInsight: {
+                text: keyInsight?.text ?? "No key insight generated",
+                supportingAgents: keyInsight?.supporting_agents ?? [],
+              },
+              risks: (payload.synthesis!.risks ?? []).map((r) => ({
+                text: r.text,
+                supportingAgents: r.supporting_agents,
+              })),
+              opportunities: (payload.synthesis!.opportunities ?? []).map((o) => ({
+                text: o.text,
+                supportingAgents: o.supporting_agents,
+              })),
+              agentSummaries: prev.agents
+                .filter((a) => a.status === "done" || a.status === "error")
+                  .map((a) => {
+                    const finding = prev.findings.findLast((f) => f.agentId === a.agentId);
+                    const meta = getAgentMeta(a.agentId);
+                    return {
+                      agentId: a.agentId,
+                      agentName: a.agentName,
+                      icon: meta.icon,
+                      color: meta.color,
+                      keyFinding: finding?.description ?? (a.status === "error" ? "Error during analysis" : "Completed"),
+                      dataQuality: (a.status === "error" ? "error" : "good") as "good" | "warning" | "error",
+                    };
+                  }),
+            },
+          };
+        });
         break;
       }
       case "telemetry.update": {
@@ -230,13 +331,13 @@ export function useRecon() {
     }
   };
 
-  const sendEmail = useCallback(async (email: string) => {
+  const sendEmail = useCallback(async (email: string, note?: string) => {
     if (!state.jobId) return;
     try {
       const res = await fetch(`${baseUrl}/api/investigations/${state.jobId}/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, note }),
       });
       return await res.json();
     } catch (err) {

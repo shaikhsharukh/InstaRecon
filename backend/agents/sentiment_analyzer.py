@@ -1,11 +1,13 @@
 import re
+import time
 import asyncio
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
 
 from agent_template import BaseAgent
-from models import AgentReport, AgentStatus, Review, SentimentReport
+from models import AgentReport, AgentStatus, Review, SentimentReport, Finding
 from logger import logger
 
 
@@ -23,43 +25,109 @@ class SentimentAnalyzer(BaseAgent):
         super().__init__(self.agent_id, self.agent_name)
 
     async def run(self, url: str, on_finding: callable) -> AgentReport:
-        domain = self._extract_domain(url)
-        if not domain:
-            return self.on_error("Could not extract domain from URL")
+        start_time = time.monotonic()
+        finding_count = 0
+        sandbox = None
+        sandbox_start = time.monotonic()
 
-        trustpilot_task = self._scrape_trustpilot(domain)
-        google_task = self._scrape_google(domain)
-        reddit_task = self._scrape_reddit(domain)
-
-        trustpilot_reviews, google_reviews, reddit_reviews = await asyncio.gather(
-            trustpilot_task, google_task, reddit_task, return_exceptions=True
-        )
-
-        if isinstance(trustpilot_reviews, Exception):
-            trustpilot_reviews = []
-        if isinstance(google_reviews, Exception):
-            google_reviews = []
-        if isinstance(reddit_reviews, Exception):
-            reddit_reviews = []
-
-        all_reviews = trustpilot_reviews + google_reviews + reddit_reviews
-        if not all_reviews:
-            report = self.create_report(
-                data={
-                    "overall_score": None,
-                    "distribution": {},
-                    "praise_themes": [],
-                    "complaint_themes": [],
-                    "trend": "insufficient_data",
-                    "sources_used": [],
-                    "review_count": 0,
-                    "message": "No reviews found for this company",
-                }
+        try:
+            await on_finding(
+                Finding(
+                    agent_id=self.agent_id,
+                    agent_name=self.agent_name,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    description="Starting sentiment analysis for " + url,
+                )
             )
-            return report
+            finding_count += 1
 
-        report_data = self._build_sentiment_report(all_reviews)
-        return self.create_report(data=report_data.model_dump())
+            # Daytona sandbox setup
+            sandbox = await self.create_daytona_sandbox()
+            if sandbox:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Spun up Daytona sandbox (ID: {sandbox.id})",
+                    )
+                )
+                res = await asyncio.to_thread(sandbox.process.exec, "uname -a")
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Daytona sandbox verified: {res.result.strip()}",
+                    )
+                )
+
+            domain = self._extract_domain(url)
+            if not domain:
+                return self.on_error("Could not extract domain from URL")
+
+            trustpilot_task = self._scrape_trustpilot(domain)
+            google_task = self._scrape_google(domain)
+            reddit_task = self._scrape_reddit(domain)
+
+            trustpilot_reviews, google_reviews, reddit_reviews = await asyncio.gather(
+                trustpilot_task, google_task, reddit_task, return_exceptions=True
+            )
+
+            if isinstance(trustpilot_reviews, Exception):
+                trustpilot_reviews = []
+            if isinstance(google_reviews, Exception):
+                google_reviews = []
+            if isinstance(reddit_reviews, Exception):
+                reddit_reviews = []
+
+            all_reviews = trustpilot_reviews + google_reviews + reddit_reviews
+            if not all_reviews:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description="No reviews found for this company",
+                    )
+                )
+                finding_count += 1
+                return self.create_report(
+                    data={
+                        "overall_score": None,
+                        "distribution": {},
+                        "praise_themes": [],
+                        "complaint_themes": [],
+                        "trend": "insufficient_data",
+                        "sources_used": [],
+                        "review_count": 0,
+                        "message": "No reviews found for this company",
+                    }
+                )
+
+            report_data = self._build_sentiment_report(all_reviews)
+            finding_count += 1
+            return self.create_report(data=report_data.model_dump())
+
+        except asyncio.TimeoutError:
+            return AgentReport(
+                agent_id=self.agent_id,
+                agent_name=self.agent_name,
+                status=AgentStatus.ERROR,
+                error="Sentiment analysis timed out",
+                duration=time.monotonic() - start_time,
+            )
+        except Exception as exc:
+            return AgentReport(
+                agent_id=self.agent_id,
+                agent_name=self.agent_name,
+                status=AgentStatus.ERROR,
+                error=str(exc),
+                duration=time.monotonic() - start_time,
+            )
+        finally:
+            if sandbox:
+                await self.destroy_daytona_sandbox(sandbox, sandbox_start)
 
     def _extract_domain(self, url: str) -> Optional[str]:
         url = url.strip().lower()

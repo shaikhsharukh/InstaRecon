@@ -16,14 +16,14 @@
   .insight { background: #f0fdf4; border-left: 4px solid #22c55e; padding: 8px 12px; margin: 6px 0; }
   .risk { background: #fef2f2; border-left: 4px solid #ef4444; padding: 8px 12px; margin: 6px 0; }
   .opportunity { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 8px 12px; margin: 6px 0; }
-  .agent-section { margin: 0.4cm 0; }
+  .agent-section { margin: 0.4cm 0; page-break-inside: avoid; break-inside: avoid; }
   .agent-header { font-weight: bold; font-size: 12pt; margin: 0.3cm 0 0.1cm 0; }
   .attribution-table { width: 100%; border-collapse: collapse; margin-top: 0.5cm; }
   .attribution-table th, .attribution-table td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 10pt; }
   .attribution-table th { background: #2563eb; color: white; }
   .footer { margin-top: 1cm; font-size: 9pt; color: #999; text-align: center; }
-  ul { margin: 0.2cm 0; padding-left: 1.2cm; }
-  li { margin: 2px 0; }
+  ul { margin: 0.2cm 0; padding-left: 1.2cm; page-break-inside: avoid; break-inside: avoid; }
+  li { margin: 2px 0; page-break-inside: avoid; break-inside: avoid; }
 </style>
 </head>
 <body>
@@ -79,7 +79,7 @@
   {% elif report.data %}
   <ul>
     {% for key, value in report.data.items() %}
-    <li><strong>{{ key | replace("_", " ") | title }}:</strong> {{ value }}</li>
+    <li><strong>{{ key | replace("_", " ") | title }}:</strong> {{ value | format_value | safe }}</li>
     {% endfor %}
   </ul>
   {% else %}

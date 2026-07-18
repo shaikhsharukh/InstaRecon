@@ -1,4 +1,5 @@
 import asyncio
+import time
 import httpx
 import json
 import os
@@ -42,6 +43,8 @@ class ProductAnalyzer(BaseAgent):
     async def run(
         self, url: str, on_finding: callable
     ) -> AgentReport:
+        sandbox = None
+        sandbox_start = time.monotonic()
         try:
             await on_finding(
                 Finding(
@@ -51,6 +54,27 @@ class ProductAnalyzer(BaseAgent):
                     description=f"Starting analysis of {url}",
                 )
             )
+
+            # Daytona sandbox setup
+            sandbox = await self.create_daytona_sandbox()
+            if sandbox:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Spun up Daytona sandbox (ID: {sandbox.id})",
+                    )
+                )
+                res = await asyncio.to_thread(sandbox.process.exec, "uname -a")
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Daytona sandbox verified: {res.result.strip()}",
+                    )
+                )
 
             scraped = await self._scrape_pages(url, on_finding)
 
@@ -101,6 +125,9 @@ class ProductAnalyzer(BaseAgent):
                 status=AgentStatus.ERROR,
                 error=str(exc),
             )
+        finally:
+            if sandbox:
+                await self.destroy_daytona_sandbox(sandbox, sandbox_start)
 
     async def _scrape_pages(
         self, url: str, on_finding: callable
@@ -191,42 +218,11 @@ class ProductAnalyzer(BaseAgent):
         self, url: str, pages: dict[str, str]
     ) -> dict:
         prompt = self._build_prompt(url, pages)
-        logger.info("ProductAnalyzer: calling Kimi API via aiand.com")
-
-        def _call_kimi() -> dict:
-            _http_client = httpx.Client(
-                verify=SSL_VERIFY, timeout=httpx.Timeout(30.0)
-            )
-            client = OpenAI(
-                base_url="https://api.aiand.com/v1",
-                api_key=os.getenv("KIMI_API_KEY"),
-                http_client=_http_client,
-                max_retries=0,
-            )
-            response = client.chat.completions.create(
-                model="deepseek-ai/deepseek-v4-flash",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a product analyst. Extract structured information from the provided web pages.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-            )
-            content = response.choices[0].message.content
-            logger.info(f"ProductAnalyzer: Kimi API responded (finish_reason={response.choices[0].finish_reason})")
-            if content:
-                json_match = content[content.find("{") : content.rfind("}") + 1]
-                return json.loads(json_match)
-            logger.warning("ProductAnalyzer: Kimi returned empty content, using fallback")
-            return self._analyze_fallback(url, pages)
-
-        try:
-            return await asyncio.to_thread(_call_kimi)
-        except Exception as e:
-            logger.error(f"ProductAnalyzer: Kimi API error: {e}")
-            return self._analyze_fallback(url, pages)
+        system_prompt = "You are a product analyst. Extract structured information from the provided web pages."
+        res = await self.kimi_analyze(prompt, system_prompt)
+        if res:
+            return res
+        return self._analyze_fallback(url, pages)
 
     def _build_prompt(self, url: str, pages: dict[str, str]) -> str:
         sections = []

@@ -12,6 +12,44 @@ from logger import logger
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
 
+def format_value(value, indent=0) -> str:
+    if value is None:
+        return "N/A"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        if not value:
+            return "None"
+        if all(isinstance(x, dict) for x in value):
+            parts = []
+            for item in value:
+                details = []
+                for k, v in item.items():
+                    details.append(f"<strong>{k.replace('_', ' ').title()}:</strong> {format_value(v, indent + 1)}")
+                parts.append(" &bull; ".join(details))
+            content = "<br>".join(f"&middot; {p}" for p in parts)
+            return f"<div style='margin-left: 15px; margin-top: 4px; line-height: 1.4;'>{content}</div>"
+        return ", ".join(str(x) for x in value)
+    if isinstance(value, dict):
+        if not value:
+            return "None"
+        parts = []
+        for k, v in value.items():
+            if k == "robots_txt_content" and isinstance(v, str):
+                v_trunc = v[:300] + "... (truncated)" if len(v) > 300 else v
+                v_esc = v_trunc.replace("<", "&lt;").replace(">", "&gt;")
+                v_html = f"<pre style='font-size: 8.5pt; background: #f3f4f6; padding: 6px; border-radius: 4px; white-space: pre-wrap; font-family: monospace; margin: 4px 0;'>{v_esc}</pre>"
+                parts.append(f"<strong>{k.replace('_', ' ').title()}:</strong> {v_html}")
+            else:
+                parts.append(f"<strong>{k.replace('_', ' ').title()}:</strong> {format_value(v, indent + 1)}")
+        content = "<br>".join(parts)
+        return f"<div style='margin-left: 15px; margin-top: 4px; line-height: 1.4;'>{content}</div>"
+    return str(value)
+
+env.filters["format_value"] = format_value
+
 
 def _serialize_synthesis(synthesis: Optional[dict]) -> Optional[dict]:
     if not synthesis:
@@ -64,6 +102,8 @@ async def generate_pdf(
 
     try:
         from weasyprint import HTML
+        with open("test_pdf.html", "w") as f:
+            f.write(html)
         pdf_bytes = HTML(string=html).write_pdf()
         return pdf_bytes
     except ImportError:

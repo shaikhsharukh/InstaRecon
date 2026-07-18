@@ -13,7 +13,7 @@ const STATUS_CONFIG: Record<string, { label: string; border: string; glow: strin
   idle: {
     label: "Idle",
     border: "1px solid rgba(255,255,255,0.08)",
-    glow: "none",
+    glow: "0 0 8px rgba(99, 102, 241, 0.3)",
   },
   pending: {
     label: "Pending",
@@ -28,7 +28,7 @@ const STATUS_CONFIG: Record<string, { label: string; border: string; glow: strin
   done: {
     label: "Done",
     border: "1px solid rgba(34, 197, 94, 0.5)",
-    glow: "0 0 20px rgba(34, 197, 94, 0.15)",
+    glow: "0 0 20px rgba(34, 197, 94, 0.25)",
   },
   error: {
     label: "Error",
@@ -45,11 +45,18 @@ const STATUS_COLORS: Record<string, string> = {
   error: "#f87171",
 };
 
+const ANIMATIONS: Record<string, string> = {
+  idle: "glowPulse 2s ease-in-out infinite",
+  pending: "none",
+  running: "colorCycle 3s ease-in-out infinite",
+  done: "scalePop 0.4s ease 2",
+  error: "shake 0.3s ease 1",
+};
+
 export default function AgentCard({ name, status, icon, color, error, progress }: AgentCardProps) {
   const config = STATUS_CONFIG[status];
   const dotColor = color || STATUS_COLORS[status];
-  const assignedAnim =
-    status === "running" ? "pulse 2s ease-in-out infinite" : error ? "pulse 1.5s ease-in-out infinite" : "none";
+  const anim = ANIMATIONS[status];
   const assignedGlow = error ? `0 0 20px rgba(239, 68, 68, 0.25)` : config.glow;
 
   return (
@@ -58,7 +65,7 @@ export default function AgentCard({ name, status, icon, color, error, progress }
         ...styles.card,
         border: config.border,
         boxShadow: assignedGlow,
-        animation: assignedAnim,
+        animation: anim,
       }}
     >
       <div style={styles.iconRow}>

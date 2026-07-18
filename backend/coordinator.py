@@ -54,6 +54,23 @@ class ReconCoordinator:
         self.telemetry.init_job(job_id)
         return job_id
 
+    def track_telemetry(self, job_id: str, service: str, duration_ms: float, success: bool, metrics: dict | None = None):
+        self.telemetry.track(job_id, service, duration_ms, success, metrics)
+        job_telemetry = self.telemetry.get_job_telemetry(job_id)
+        service_telemetry = job_telemetry.get(service)
+        if service_telemetry:
+            asyncio.create_task(self.emit_event(
+                job_id,
+                WebSocketEvent(
+                    type=WebSocketEventType.TELEMETRY_UPDATE,
+                    payload={
+                        "job_id": job_id,
+                        "service": service,
+                        "data": service_telemetry.model_dump()
+                    }
+                )
+            ))
+
     def check_cache(self, url: str) -> Optional[dict]:
         cached = self.cache.get(url)
         if cached is not None:
@@ -84,6 +101,9 @@ class ReconCoordinator:
         agent: BaseAgent,
         url: str,
     ) -> AgentReport:
+        agent.job_id = job_id
+        agent.track_telemetry = lambda service, duration, success, metrics=None: self.track_telemetry(job_id, service, duration, success, metrics)
+
         report = AgentReport(
             agent_id=agent.agent_id,
             agent_name=agent.agent_name,

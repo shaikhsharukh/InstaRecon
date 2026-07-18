@@ -44,6 +44,8 @@ class SocialAuditor(BaseAgent):
     async def run(self, url: str, on_finding: callable) -> AgentReport:
         start_time = time.monotonic()
         finding_count = 0
+        sandbox = None
+        sandbox_start = time.monotonic()
 
         try:
             await on_finding(
@@ -55,6 +57,27 @@ class SocialAuditor(BaseAgent):
                 )
             )
             finding_count += 1
+
+            # Daytona sandbox setup
+            sandbox = await self.create_daytona_sandbox()
+            if sandbox:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Spun up Daytona sandbox (ID: {sandbox.id})",
+                    )
+                )
+                res = await asyncio.to_thread(sandbox.process.exec, "uname -a")
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Daytona sandbox verified: {res.result.strip()}",
+                    )
+                )
 
             social_links = await self._find_social_links(url, on_finding)
             if social_links is None:
@@ -114,6 +137,9 @@ class SocialAuditor(BaseAgent):
                 error=str(exc),
                 duration=time.monotonic() - start_time,
             )
+        finally:
+            if sandbox:
+                await self.destroy_daytona_sandbox(sandbox, sandbox_start)
 
     async def _find_social_links(self, url: str, on_finding: callable) -> list[str]:
         try:

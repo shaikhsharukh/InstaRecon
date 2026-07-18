@@ -6,6 +6,9 @@ import UrlInputBar from "./components/UrlInputBar";
 import SwarmStatusPanel from "./components/SwarmStatusPanel";
 import LiveFindingsFeed from "./components/LiveFindingsFeed";
 import SponsorTelemetry from "./components/SponsorTelemetry";
+import IntelBrief from "./components/IntelBrief";
+import ParticleField from "./components/ParticleField";
+import EmailModal from "./components/EmailModal";
 
 export default function Home() {
   const {
@@ -16,30 +19,34 @@ export default function Home() {
     reconnecting,
     reconnectAttempt,
     startRecon,
-    sendEmail,
     downloadPdf,
+    sendEmail,
     reset,
     overallProgress,
     telemetry,
     cached,
     cachedAt,
+    showIntelBrief,
+    intelBriefData,
   } = useRecon();
-  const [email, setEmail] = useState("");
-  const [emailStatus, setEmailStatus] = useState<string | null>(null);
+
+  const [showEmailModal, setShowEmailModal] = useState(false);
 
   const isRunning = status === "running";
   const isComplete = status === "complete";
+  const showSwarm = !showIntelBrief;
 
-  const handleSendEmail = async () => {
-    if (!email || !email.includes("@")) return;
-    setEmailStatus("sending...");
-    const result = await sendEmail(email);
-    setEmailStatus(result?.status === "sent" ? "✓ Sent!" : "✗ Failed");
-    setTimeout(() => setEmailStatus(null), 3000);
+  const handleRunCompetitor = () => {
+    reset();
+  };
+
+  const handleEmailSend = async (email: string, note?: string) => {
+    await sendEmail(email, note);
   };
 
   return (
     <main style={styles.main}>
+      <ParticleField intensity={0.3} />
       <div style={styles.container}>
         <header style={styles.header}>
           <h1 style={styles.title}>InstaRecon</h1>
@@ -88,15 +95,37 @@ export default function Home() {
           </div>
         )}
 
-        <div style={styles.panelSection}>
+        <div
+          style={{
+            ...styles.panelSection,
+            animation: showSwarm ? "none" : "slideOutLeft 0.3s ease both",
+            display: showSwarm ? "block" : "none",
+          }}
+        >
           <SwarmStatusPanel agents={agents} />
         </div>
 
-        <div style={styles.feedSection}>
+        <div
+          style={{
+            ...styles.feedSection,
+            display: showSwarm ? "block" : "none",
+          }}
+        >
           <LiveFindingsFeed findings={findings} />
         </div>
 
-        {isComplete && (
+        {showIntelBrief && intelBriefData && (
+          <div style={styles.briefSection}>
+            <IntelBrief
+              data={intelBriefData}
+              onExportPdf={downloadPdf}
+              onEmailReport={() => setShowEmailModal(true)}
+              onRunCompetitor={handleRunCompetitor}
+            />
+          </div>
+        )}
+
+        {isComplete && !showIntelBrief && (
           <div style={styles.completeSection}>
             <div style={styles.completeBanner}>
               Investigation complete.
@@ -105,25 +134,6 @@ export default function Home() {
               <button onClick={downloadPdf} style={styles.actionButton}>
                 📄 Download PDF
               </button>
-              <div style={styles.emailRow}>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  style={styles.emailInput}
-                />
-                <button
-                  onClick={handleSendEmail}
-                  disabled={!email || !email.includes("@")}
-                  style={{
-                    ...styles.actionButton,
-                    ...(!email || !email.includes("@") ? styles.buttonDisabled : {}),
-                  }}
-                >
-                  {emailStatus || "📧 Send Email"}
-                </button>
-              </div>
               <button onClick={reset} style={styles.newButton}>
                 New Investigation
               </button>
@@ -139,6 +149,12 @@ export default function Home() {
           />
         </div>
       </div>
+
+      <EmailModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        onSend={handleEmailSend}
+      />
     </main>
   );
 }
@@ -230,6 +246,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   panelSection: {},
   feedSection: {},
+  briefSection: {
+    animation: "slideInRight 0.3s ease both",
+  },
   telemetrySection: {},
   banner: {
     display: "flex",
@@ -296,27 +315,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 600,
     whiteSpace: "nowrap",
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-    cursor: "not-allowed",
-  },
-  emailRow: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    flex: 1,
-  },
-  emailInput: {
-    flex: 1,
-    padding: "10px 14px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.1)",
-    background: "rgba(255,255,255,0.06)",
-    color: "#fff",
-    fontSize: 13,
-    outline: "none",
-    minWidth: 160,
   },
   newButton: {
     padding: "10px 20px",

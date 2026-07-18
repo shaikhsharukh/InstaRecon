@@ -22,12 +22,78 @@ const AGENT_COLORS: Record<string, string> = {
   seo_scanner: "#F97316",
 };
 
+const NEW_BADGE_DURATION = 3000;
+
+function RelativeTime({ timestamp }: { timestamp: string }) {
+  const [label, setLabel] = useState("");
+
+  useEffect(() => {
+    const update = () => {
+      const diff = Date.now() - new Date(timestamp).getTime();
+      const secs = Math.floor(diff / 1000);
+      if (secs < 5) setLabel("just now");
+      else if (secs < 60) setLabel(`${secs}s ago`);
+      else if (secs < 3600) setLabel(`${Math.floor(secs / 60)}m ago`);
+      else setLabel(`${Math.floor(secs / 3600)}h ago`);
+    };
+
+    update();
+    const interval = setInterval(update, 5000);
+    return () => clearInterval(interval);
+  }, [timestamp]);
+
+  return <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>{label}</span>;
+}
+
+function TypingText({ text, startedAt }: { text: string; startedAt: number }) {
+  const [displayed, setDisplayed] = useState("");
+  const idxRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    idxRef.current = 0;
+    setDisplayed("");
+
+    const charsPerTick = 3;
+    const tick = () => {
+      const next = idxRef.current + charsPerTick;
+      if (idxRef.current < text.length) {
+        setDisplayed(text.slice(0, next));
+        idxRef.current = next;
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [text, startedAt]);
+
+  return <>{displayed}</>;
+}
+
 export default function LiveFindingsFeed({ findings }: LiveFindingsFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [visibleBadges, setVisibleBadges] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [findings.length]);
+
+  useEffect(() => {
+    if (findings.length === 0) return;
+    const idx = findings.length - 1;
+    setVisibleBadges((prev) => new Set(prev).add(idx));
+    const timer = setTimeout(() => {
+      setVisibleBadges((prev) => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }, NEW_BADGE_DURATION);
+    return () => clearTimeout(timer);
   }, [findings.length]);
 
   const toggleExpand = (i: number) => {
@@ -56,6 +122,9 @@ export default function LiveFindingsFeed({ findings }: LiveFindingsFeedProps) {
           const color = AGENT_COLORS[finding.agentId] || "#818cf8";
           const meta = getAgentMeta(finding.agentId);
           const isExpanded = expandedIndex === i;
+          const isNew = visibleBadges.has(i);
+          const entryStart = i === findings.length - 1 ? Date.now() : 0;
+
           return (
             <div
               key={i}
@@ -63,18 +132,28 @@ export default function LiveFindingsFeed({ findings }: LiveFindingsFeedProps) {
                 ...styles.entry,
                 borderLeft: `3px solid ${color}`,
                 cursor: "pointer",
+                animation: isNew ? "fadeIn 0.2s ease" : "none",
               }}
               onClick={() => toggleExpand(i)}
             >
-              <div style={styles.entryIcon}>{meta.icon}</div>
+              <span style={styles.entryIcon}>{meta.icon}</span>
               <div style={styles.entryBody}>
                 <div style={styles.entryHeader}>
-                  <span style={{ ...styles.entryAgent, color }}>{finding.agentName}</span>
-                  <span style={styles.entryTime}>
-                    {new Date(finding.timestamp).toLocaleTimeString()}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ ...styles.entryAgent, color }}>{finding.agentName}</span>
+                    {isNew && (
+                      <span style={styles.newBadge}>New</span>
+                    )}
+                  </div>
+                  <RelativeTime timestamp={finding.timestamp} />
                 </div>
-                <div style={styles.entryDescription}>{finding.description}</div>
+                <div style={styles.entryDescription}>
+                  {entryStart > 0 ? (
+                    <TypingText text={finding.description} startedAt={entryStart} />
+                  ) : (
+                    finding.description
+                  )}
+                </div>
                 {isExpanded && (
                   <div style={styles.expandedDetail}>
                     <div style={styles.detailRow}>
@@ -153,14 +232,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 600,
   },
-  entryTime: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.3)",
-  },
   entryDescription: {
     fontSize: 13,
     color: "rgba(255,255,255,0.8)",
     lineHeight: 1.4,
+  },
+  newBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: "#22c55e",
+    padding: "1px 5px",
+    borderRadius: 4,
+    background: "rgba(34,197,94,0.15)",
+    animation: "newBadgePulse 1s ease-in-out 2",
   },
   expandedDetail: {
     marginTop: 8,

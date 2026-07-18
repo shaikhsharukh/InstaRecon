@@ -27,6 +27,8 @@ class CompetitorFinder(BaseAgent):
     async def run(self, url: str, on_finding: callable) -> AgentReport:
         start_time = time.monotonic()
         finding_count = 0
+        sandbox = None
+        sandbox_start = time.monotonic()
 
         try:
             await on_finding(
@@ -38,6 +40,27 @@ class CompetitorFinder(BaseAgent):
                 )
             )
             finding_count += 1
+
+            # Daytona sandbox setup
+            sandbox = await self.create_daytona_sandbox()
+            if sandbox:
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Spun up Daytona sandbox (ID: {sandbox.id})",
+                    )
+                )
+                res = await asyncio.to_thread(sandbox.process.exec, "uname -a")
+                await on_finding(
+                    Finding(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        description=f"Daytona sandbox verified: {res.result.strip()}",
+                    )
+                )
 
             if not self._company_name:
                 await on_finding(
@@ -74,9 +97,9 @@ class CompetitorFinder(BaseAgent):
                     )
                 )
                 finding_count += 1
+                return self.create_report(data={})
 
             competitors = serp_results[:10]
-
             comparison = await self._build_comparison(url, competitors, on_finding)
             if comparison:
                 finding_count += 1
@@ -101,7 +124,7 @@ class CompetitorFinder(BaseAgent):
                 agent_id=self.agent_id,
                 agent_name=self.agent_name,
                 status=AgentStatus.ERROR,
-                error="Competitor search timed out",
+                error="Competitor finding timed out",
                 duration=time.monotonic() - start_time,
             )
         except Exception as exc:
@@ -112,6 +135,9 @@ class CompetitorFinder(BaseAgent):
                 error=str(exc),
                 duration=time.monotonic() - start_time,
             )
+        finally:
+            if sandbox:
+                await self.destroy_daytona_sandbox(sandbox, sandbox_start)
 
     async def _search_competitors(self, query: str, on_finding: callable):
         result = await self.oxylabs_scrape(

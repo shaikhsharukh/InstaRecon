@@ -53,3 +53,4 @@ dist/
 specs
 docs
 zscaler-root-ca.crt
+test_*
