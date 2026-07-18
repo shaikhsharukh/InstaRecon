@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# InstaRecon
 
-## Getting Started
+**Instant company intelligence for any website.**
 
-First, run the development server:
+Give InstaRecon a URL and it produces a full research report on the company behind it. A swarm of specialized research agents — each running in its own isolated [Daytona](https://www.daytona.io/) sandbox — investigates the company in parallel, streams findings live to the browser, and hands everything to a compiler that synthesizes a final Intel Brief. The finished report is displayed on the website and available for download as a PDF.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## How It Works
+
+1. **Submit a URL** — paste any website/domain into the web app (Next.js frontend).
+2. **Swarm spawns** — the FastAPI backend coordinator creates a job and launches the research agents in parallel, each in an independent Daytona sandbox.
+3. **Agents investigate** — every agent researches one dimension of the company:
+
+   | Agent | What it digs up |
+   |-------|-----------------|
+   | 🔍 **Product Analyzer** | Company name, product, category, and target market (runs first — feeds the Competitor Finder) |
+   | ⚔️ **Competitor Finder** | Top competitors and a comparison matrix |
+   | 🛠️ **Tech Stack Detective** | Frameworks, CMS, CDN, and hosting infrastructure |
+   | 📈 **SEO Scanner** | SEO health — meta tags, structure, performance |
+   | 📣 **Social Auditor** | Social media profiles and presence assessment |
+   | 💬 **Sentiment Analyzer** | Reviews from Trustpilot, Google, and Reddit with sentiment analysis |
+   | 👔 **Hiring Signal Detector** | Job listings and inferred hiring strategy |
+
+4. **Live feed** — findings stream to the UI over WebSocket while agents work.
+5. **Compile** — the Synthesizer cross-references all agent reports: agreements, conflicts, anomalies, risks, and opportunities.
+6. **Deliver** — the final Intel Brief is rendered on the site and downloadable as a PDF (or sent by email).
+
+## Architecture
+
+```mermaid
+flowchart TD
+    U([User]) -->|website / domain| FE[Next.js Web App]
+    FE -->|POST /api/recon| CO[FastAPI Coordinator]
+
+    CO --> A1 & A2 & A3 & A4 & A5 & A6 & A7
+
+    subgraph Daytona Sandboxes — one per agent
+        A1[🔍 Product Analyzer]
+        A2[⚔️ Competitor Finder]
+        A3[🛠️ Tech Stack Detective]
+        A4[📈 SEO Scanner]
+        A5[📣 Social Auditor]
+        A6[💬 Sentiment Analyzer]
+        A7[👔 Hiring Signal Detector]
+    end
+
+    A1 -.->|company + category| A2
+
+    A1 & A2 & A3 & A4 & A5 & A6 & A7 --> SY[Compiler / Synthesizer]
+
+    SY --> RP[📄 Final Intel Brief]
+    RP -->|view + PDF download| FE
+    CO -.->|WebSocket: live findings| FE
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Sample Report
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+A preview of a generated Intel Brief will appear here for the demo.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+<!-- TODO: embed sample report preview once generated -->
+> 🚧 *Sample report not generated yet — coming soon.*
