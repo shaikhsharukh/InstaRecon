@@ -33,7 +33,7 @@ flowchart TD
 
     CO --> A1 & A2 & A3 & A4 & A5 & A6 & A7
 
-    subgraph Daytona Sandboxes — one per agent
+    subgraph Daytona ["Daytona Sandboxes — one per agent"]
         A1[🔍 Product Analyzer]
         A2[⚔️ Competitor Finder]
         A3[🛠️ Tech Stack Detective]
@@ -47,7 +47,7 @@ flowchart TD
 
     A1 & A2 & A3 & A4 & A5 & A6 & A7 --> SY[Compiler / Synthesizer]
 
-    SY --> RP[📄 Final Intel Brief]
+    SY --> RP["📄 Final Intel Brief"]
     RP -->|view + PDF download| FE
     CO -.->|WebSocket: live findings| FE
 ```
